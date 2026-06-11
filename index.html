@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>نظام التعرف بالوجه</title>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg-primary: #ffffff; --bg-secondary: #f5f5f4; --bg-tertiary: #eeece8;
+      --text-primary: #1a1a18; --text-secondary: #6b6b67;
+      --border-light: rgba(0,0,0,0.12); --border-mid: rgba(0,0,0,0.22);
+      --green-bg: #E1F5EE; --green-mid: #1D9E75; --green-dark: #0F6E56; --green-text: #085041;
+      --red-bg: #FCEBEB; --red-border: #F7C1C1; --red-text: #A32D2D;
+      --amber-bg: #FAEEDA; --amber-text: #633806;
+      --radius-md: 8px; --radius-lg: 12px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-primary: #1e1e1c; --bg-secondary: #2a2a28; --bg-tertiary: #323230;
+        --text-primary: #f0ede8; --text-secondary: #9a9892;
+        --border-light: rgba(255,255,255,0.12); --border-mid: rgba(255,255,255,0.22);
+        --green-bg: #04342C; --green-mid: #1D9E75; --green-dark: #5DCAA5; --green-text: #9FE1CB;
+        --red-bg: #501313; --red-border: #791F1F; --red-text: #F09595;
+        --amber-bg: #412402; --amber-text: #FAC775;
+      }
+    }
+    html, body { min-height: 100vh; background: var(--bg-tertiary); font-family: 'Tajawal', sans-serif; color: var(--text-primary); }
+    #app { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem 1rem; }
+
+    /* phases */
+    .phase { display: none; flex-direction: column; align-items: center; gap: 1.25rem; width: 100%; max-width: 520px; }
+    .phase.active { display: flex; }
+    .app-tag { font-size: 12px; font-weight: 500; color: var(--text-secondary); letter-spacing: 0.1em; text-transform: uppercase; }
+    h2 { font-size: 22px; font-weight: 500; color: var(--text-primary); text-align: center; }
+    p.sub { font-size: 14px; color: var(--text-secondary); text-align: center; line-height: 1.7; }
+
+    /* permission screen */
+    .perm-box {
+      width: 100%; padding: 2rem; border-radius: var(--radius-lg);
+      background: var(--bg-primary); border: 0.5px solid var(--border-light);
+      display: flex; flex-direction: column; align-items: center; gap: 1rem; text-align: center;
+    }
+    .perm-box .perm-icon { font-size: 52px; color: var(--green-mid); }
+    .perm-box p { font-size: 14px; color: var(--text-secondary); line-height: 1.7; }
+
+    /* loading */
+    .loader-ring {
+      width: 52px; height: 52px;
+      border: 3px solid var(--border-light); border-top-color: var(--green-mid);
+      border-radius: 50%; animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .progress-bar-wrap { width: 100%; height: 6px; background: var(--bg-secondary); border-radius: 999px; overflow: hidden; }
+    .progress-bar { height: 100%; background: var(--green-mid); border-radius: 999px; transition: width 0.4s ease; width: 0%; }
+
+    /* camera */
+    .cam-wrap {
+      position: relative; width: 100%; max-width: 420px; aspect-ratio: 4/3;
+      border-radius: var(--radius-lg); overflow: hidden; background: #111;
+      border: 0.5px solid var(--border-light);
+    }
+    #video, #video-ver { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+    #canvas-reg, #canvas-ver { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+    .cam-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; pointer-events: none; }
+    .cam-frame { width: 150px; height: 190px; border: 2px solid rgba(255,255,255,0.45); border-radius: 50% / 60%; transition: border-color 0.3s, border-width 0.3s; }
+    .cam-frame.detected { border-color: #1D9E75; border-width: 3px; animation: glow 1s ease-in-out infinite alternate; }
+    @keyframes glow { from { box-shadow: 0 0 0 0 rgba(29,158,117,0.5); } to { box-shadow: 0 0 0 12px rgba(29,158,117,0); } }
+    .cam-status { background: rgba(0,0,0,0.6); color: #fff; font-size: 12px; padding: 5px 14px; border-radius: 999px; }
+    .cam-status.ok { background: rgba(29,158,117,0.9); }
+    .cam-status.err { background: rgba(226,75,74,0.9); }
+
+    /* registered list */
+    .reg-list { width: 100%; display: flex; flex-direction: column; gap: 8px; }
+    .reg-item {
+      display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+      border-radius: var(--radius-md); background: var(--bg-primary); border: 0.5px solid var(--border-light);
+      font-size: 14px; animation: slideIn 0.3s ease;
+    }
+    @keyframes slideIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+    .badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: var(--radius-md); background: var(--green-bg); color: var(--green-text); letter-spacing: 1px; font-family: monospace; white-space: nowrap; }
+    .item-name { color: var(--text-primary); font-weight: 500; flex: 1; }
+
+    /* dots */
+    .dots { display: flex; gap: 10px; justify-content: center; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--border-light); transition: background 0.3s, transform 0.2s; }
+    .dot.filled { background: var(--green-mid); transform: scale(1.1); }
+
+    .counter-info { font-size: 13px; color: var(--text-secondary); text-align: center; }
+    .counter-info span { font-weight: 700; color: var(--text-primary); }
+
+    /* buttons */
+    .btn {
+      padding: 11px 32px; border-radius: var(--radius-md); border: 0.5px solid var(--border-mid);
+      background: var(--bg-primary); font-size: 15px; font-weight: 500; color: var(--text-primary);
+      cursor: pointer; font-family: 'Tajawal', sans-serif; transition: background 0.15s, transform 0.1s;
+    }
+    .btn:hover { background: var(--bg-secondary); }
+    .btn:active { transform: scale(0.98); }
+    .btn.primary { background: var(--green-mid); color: #fff; border-color: var(--green-mid); }
+    .btn.primary:hover { background: var(--green-dark); }
+    .btn.capturing { background: var(--amber-bg); color: var(--amber-text); border-color: var(--amber-text); animation: pulse 0.9s ease-in-out infinite alternate; }
+    @keyframes pulse { from { opacity:1; } to { opacity:0.7; } }
+    .btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+
+    /* result */
+    .result-card { width: 100%; padding: 1.5rem; border-radius: var(--radius-lg); background: var(--bg-primary); border: 0.5px solid var(--border-light); text-align: center; animation: slideIn 0.3s ease; }
+    .result-card .r-icon { font-size: 42px; color: var(--green-mid); margin-bottom: 8px; }
+    .result-card .r-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; letter-spacing: 0.06em; }
+    .result-card .r-uid { font-size: 28px; font-weight: 700; color: var(--text-primary); font-family: monospace; letter-spacing: 3px; }
+    .result-card .r-name { font-size: 14px; color: var(--text-secondary); margin-top: 6px; }
+    .result-card .r-conf { font-size: 12px; margin-top: 10px; padding: 4px 12px; border-radius: var(--radius-md); display: inline-block; background: var(--green-bg); color: var(--green-text); }
+    .unknown-card { width: 100%; padding: 1.25rem; border-radius: var(--radius-lg); background: var(--red-bg); border: 0.5px solid var(--red-border); text-align: center; animation: slideIn 0.3s ease; }
+    .unknown-card .u-icon { font-size: 32px; color: var(--red-text); margin-bottom: 8px; }
+    .unknown-card .u-label { font-size: 14px; color: var(--red-text); font-weight: 500; }
+
+    .info-box { width: 100%; padding: 12px 16px; background: var(--bg-secondary); border-radius: var(--radius-md); font-size: 13px; color: var(--text-secondary); text-align: center; line-height: 1.6; }
+    .info-box strong { color: var(--text-primary); }
+    .divider { width: 100%; height: 0.5px; background: var(--border-light); }
+    .reset-btn { font-size: 13px; color: var(--text-secondary); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; background: none; border: none; font-family: 'Tajawal', sans-serif; padding: 4px 8px; }
+    .reset-btn:hover { color: var(--text-primary); }
+    .error-msg { font-size: 13px; color: var(--red-text); background: var(--red-bg); padding: 10px 16px; border-radius: var(--radius-md); border: 0.5px solid var(--red-border); width: 100%; text-align: center; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- شاشة طلب الإذن -->
+  <div id="phase-permission" class="phase active">
+    <span class="app-tag">نظام التعرف بالوجه</span>
+    <div class="perm-box">
+      <i class="ti ti-camera perm-icon" aria-hidden="true"></i>
+      <h2>السماح بالكاميرا</h2>
+      <p>يحتاج هذا النظام للوصول إلى الكاميرا للتعرف على الوجوه.<br>جميع البيانات تبقى في جهازك ولا ترسل لأي خادم.</p>
+      <div id="perm-error" class="error-msg" style="display:none"></div>
+      <button class="btn primary" id="perm-btn" onclick="requestCamera()">
+        <i class="ti ti-camera" aria-hidden="true"></i> السماح بالكاميرا والبدء
+      </button>
+    </div>
+  </div>
+
+  <!-- شاشة تحميل النماذج -->
+  <div id="phase-loading" class="phase">
+    <span class="app-tag">نظام التعرف بالوجه</span>
+    <div class="loader-ring"></div>
+    <h2>تحميل نماذج الذكاء الاصطناعي</h2>
+    <div class="progress-bar-wrap"><div class="progress-bar" id="progress-bar"></div></div>
+    <p class="sub" id="loading-status">جارٍ التحضير...</p>
+    <p class="sub" style="font-size:12px;opacity:0.7">قد يأخذ هذا 15-30 ثانية في أول مرة</p>
+  </div>
+
+  <!-- مرحلة التسجيل -->
+  <div id="phase-register" class="phase">
+    <span class="app-tag">نظام التعرف بالوجه</span>
+    <h2>تسجيل الوجوه</h2>
+    <p class="sub">انظر للكاميرا ثم اضغط "سجّل وجهي" · من 2 إلى 5 أشخاص</p>
+    <div class="cam-wrap">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="canvas-reg"></canvas>
+      <div class="cam-overlay">
+        <div class="cam-frame" id="cam-frame-reg"></div>
+        <div class="cam-status" id="cam-status-reg">ابحث عن وجه...</div>
+      </div>
+    </div>
+    <button class="btn primary" id="capture-btn" onclick="captureUser()" disabled>
+      <i class="ti ti-camera" aria-hidden="true"></i> سجّل وجهي
+    </button>
+    <div class="dots">
+      <div class="dot" id="d0"></div><div class="dot" id="d1"></div>
+      <div class="dot" id="d2"></div><div class="dot" id="d3"></div><div class="dot" id="d4"></div>
+    </div>
+    <div class="reg-list" id="reg-list"></div>
+    <p class="counter-info" id="reg-counter">تم تسجيل <span>0</span> · الحد الأدنى 2 أشخاص</p>
+    <div class="divider"></div>
+    <button class="btn primary" id="continue-btn" disabled onclick="goToVerify()">استمر &larr;</button>
+  </div>
+
+  <!-- مرحلة التحقق -->
+  <div id="phase-verify" class="phase">
+    <span class="app-tag">نظام التعرف بالوجه</span>
+    <h2>مرحلة التحقق</h2>
+    <p class="sub">انظر للكاميرا · سيتم التعرف عليك تلقائياً</p>
+    <div class="cam-wrap">
+      <video id="video-ver" autoplay muted playsinline></video>
+      <canvas id="canvas-ver"></canvas>
+      <div class="cam-overlay">
+        <div class="cam-frame" id="cam-frame-ver"></div>
+        <div class="cam-status" id="cam-status-ver">ابحث عن وجه...</div>
+      </div>
+    </div>
+    <div id="verify-result"></div>
+    <div class="info-box">المسجلون: <strong id="verify-count">0</strong> شخص · انظر للكاميرا للتعرف التلقائي</div>
+    <div class="divider"></div>
+    <button class="reset-btn" onclick="resetAll()">
+      <i class="ti ti-refresh" style="font-size:14px;vertical-align:-2px;" aria-hidden="true"></i>
+      إعادة التسجيل من البداية
+    </button>
+  </div>
+
+</div>
+<script>
+const MODELS_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
+const THRESHOLD = 0.52;
+
+const state = { users: [], stream: null, verStream: null, detectLoop: null, verifyLoop: null, faceDetected: false };
+
+function uid8() {
+  const c = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = '';
+  for (let i = 0; i < 8; i++) s += c[Math.floor(Math.random() * c.length)];
+  return s.slice(0,4) + '-' + s.slice(4);
+}
+
+function showPhase(name) {
+  document.querySelectorAll('.phase').forEach(p => p.classList.remove('active'));
+  document.getElementById('phase-' + name).classList.add('active');
+}
+
+// ── STEP 1: طلب الكاميرا أولاً قبل أي شيء ──
+async function requestCamera() {
+  const btn = document.getElementById('perm-btn');
+  const errEl = document.getElementById('perm-error');
+  btn.disabled = true;
+  btn.textContent = 'جارٍ الاتصال بالكاميرا...';
+  errEl.style.display = 'none';
+
+  // نجرب ثلاث محاولات بترتيب تنازلي في المتطلبات
+  const attempts = [
+    { video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } },
+    { video: { facingMode: 'user' } },
+    { video: true }
+  ];
+
+  let lastError = null;
+  for (const constraints of attempts) {
+    try {
+      state.stream = await navigator.mediaDevices.getUserMedia(constraints);
+      // نجحت — نكمل
+      showPhase('loading');
+      await loadModels();
+      return;
+    } catch (e) {
+      lastError = e;
+      // إذا كان الخطأ رفض إذن أو لا توجد كاميرا فلا فائدة من إعادة المحاولة
+      if (e.name === 'NotAllowedError' || e.name === 'NotFoundError') break;
+      // غير ذلك نجرب القيود الأبسط
+    }
+  }
+
+  // كل المحاولات فشلت
+  btn.disabled = false;
+  btn.innerHTML = '<i class="ti ti-camera" aria-hidden="true"></i> المحاولة مرة أخرى';
+  errEl.style.display = 'block';
+
+  const e = lastError;
+  if (e.name === 'NotAllowedError') {
+    errEl.innerHTML = '🔒 تم رفض الإذن.<br>افتح إعدادات المتصفح ← الخصوصية ← الكاميرا وامنح الإذن لهذا الموقع.';
+  } else if (e.name === 'NotFoundError') {
+    errEl.innerHTML = '📷 لم يتم العثور على كاميرا في هذا الجهاز.';
+  } else if (e.name === 'NotReadableError' || e.message.includes('Could not start')) {
+    errEl.innerHTML = '⚠️ الكاميرا مشغولة من تطبيق آخر.<br><strong>أغلق</strong> Zoom أو Teams أو أي برنامج يستخدم الكاميرا الآن، ثم حاول مرة أخرى.';
+  } else if (e.name === 'OverconstrainedError') {
+    errEl.innerHTML = '⚠️ الكاميرا لا تدعم الإعدادات المطلوبة. جرّب مرة أخرى.';
+  } else {
+    errEl.innerHTML = '❌ خطأ: ' + e.name + '<br>' + e.message;
+  }
+}
+
+// ── STEP 2: تحميل نماذج AI بعد الحصول على الكاميرا ──
+async function loadModels() {
+  const bar = document.getElementById('progress-bar');
+  const status = document.getElementById('loading-status');
+
+  const steps = [
+    { label: 'تحميل كاشف الوجوه...', pct: 20, fn: () => faceapi.nets.tinyFaceDetector.loadFromUri(MODELS_URL) },
+    { label: 'تحميل نموذج نقاط الوجه...', pct: 60, fn: () => faceapi.nets.faceLandmark68Net.loadFromUri(MODELS_URL) },
+    { label: 'تحميل نموذج التعرف...', pct: 90, fn: () => faceapi.nets.faceRecognitionNet.loadFromUri(MODELS_URL) },
+  ];
+
+  for (const step of steps) {
+    status.textContent = step.label;
+    bar.style.width = step.pct + '%';
+    await step.fn();
+  }
+
+  bar.style.width = '100%';
+  status.textContent = 'جاهز!';
+
+  // ربط stream الكاميرا المحفوظ بعنصر video
+  const video = document.getElementById('video');
+  video.srcObject = state.stream;
+  await new Promise(r => { video.onloadedmetadata = r; });
+  await video.play();
+
+  showPhase('register');
+  startDetectionLoop();
+}
+
+// ── كشف الوجه في مرحلة التسجيل ──
+function startDetectionLoop() {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas-reg');
+  const frame = document.getElementById('cam-frame-reg');
+  const statusEl = document.getElementById('cam-status-reg');
+  const captureBtn = document.getElementById('capture-btn');
+
+  async function loop() {
+    if (video.readyState >= 2) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const det = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.4, inputSize: 320 }));
+
+      if (det) {
+        state.faceDetected = true;
+        frame.classList.add('detected');
+        statusEl.textContent = 'وجه مكتشف ✓';
+        statusEl.className = 'cam-status ok';
+        captureBtn.disabled = state.users.length >= 5;
+        const b = det.box;
+        ctx.strokeStyle = '#1D9E75'; ctx.lineWidth = 2;
+        ctx.strokeRect(b.x, b.y, b.width, b.height);
+      } else {
+        state.faceDetected = false;
+        frame.classList.remove('detected');
+        statusEl.textContent = 'ابحث عن وجه...';
+        statusEl.className = 'cam-status';
+        captureBtn.disabled = true;
+      }
+    }
+    state.detectLoop = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+// ── التقاط وجه وتسجيله ──
+async function captureUser() {
+  const video = document.getElementById('video');
+  const btn = document.getElementById('capture-btn');
+  if (!state.faceDetected || state.users.length >= 5) return;
+
+  btn.disabled = true;
+  btn.classList.add('capturing');
+  btn.textContent = 'جارٍ الالتقاط...';
+
+  const det = await faceapi
+    .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.4, inputSize: 320 }))
+    .withFaceLandmarks()
+    .withFaceDescriptor();
+
+  btn.classList.remove('capturing');
+  btn.innerHTML = '<i class="ti ti-camera" aria-hidden="true"></i> سجّل وجهي';
+
+  if (!det) {
+    alert('لم يتم كشف وجه، حاول مرة أخرى');
+    btn.disabled = false;
+    return;
+  }
+
+  state.users.push({ uid: uid8(), name: 'شخص ' + (state.users.length + 1), descriptor: det.descriptor });
+  updateRegUI();
+}
+
+function updateRegUI() {
+  const count = state.users.length;
+  for (let i = 0; i < 5; i++) document.getElementById('d' + i).classList.toggle('filled', i < count);
+  document.getElementById('reg-list').innerHTML = state.users.map(u =>
+    `<div class="reg-item"><i class="ti ti-user" style="font-size:18px;color:var(--text-secondary)" aria-hidden="true"></i><span class="item-name">${u.name}</span><span class="badge">${u.uid}</span></div>`
+  ).join('');
+  const ctr = document.getElementById('reg-counter');
+  if      (count === 0) ctr.innerHTML = 'تم تسجيل <span>0</span> · الحد الأدنى 2 أشخاص';
+  else if (count < 2)   ctr.innerHTML = 'تم تسجيل <span>' + count + '</span> · يلزم شخص آخر على الأقل';
+  else if (count < 5)   ctr.innerHTML = 'تم تسجيل <span>' + count + '</span> · يمكنك إضافة <span>' + (5-count) + '</span> أكثر';
+  else                  ctr.innerHTML = 'وصلت للحد الأقصى · <span>5</span> أشخاص مسجلون';
+  document.getElementById('capture-btn').disabled = count >= 5 || !state.faceDetected;
+  document.getElementById('continue-btn').disabled = count < 2;
+}
+
+// ── الانتقال لمرحلة التحقق ──
+function goToVerify() {
+  cancelAnimationFrame(state.detectLoop); state.detectLoop = null;
+  if (state.stream) { state.stream.getTracks().forEach(t => t.stop()); state.stream = null; }
+  showPhase('verify');
+  document.getElementById('verify-count').textContent = state.users.length;
+  startVerifyCamera();
+}
+
+async function startVerifyCamera() {
+  try {
+    state.verStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
+    });
+    const video = document.getElementById('video-ver');
+    video.srcObject = state.verStream;
+    await new Promise(r => { video.onloadedmetadata = r; });
+    await video.play();
+
+    const labeledDescriptors = state.users.map(u =>
+      new faceapi.LabeledFaceDescriptors(u.uid + '|' + u.name, [u.descriptor])
+    );
+    const matcher = new faceapi.FaceMatcher(labeledDescriptors, THRESHOLD);
+    startVerifyLoop(video, matcher);
+  } catch(e) {
+    document.getElementById('verify-result').innerHTML =
+      '<div class="unknown-card"><div class="u-label">فشل تشغيل الكاميرا: ' + e.message + '</div></div>';
+  }
+}
+
+let lastMatchTime = 0;
+
+function startVerifyLoop(video, matcher) {
+  const canvas = document.getElementById('canvas-ver');
+  const frame = document.getElementById('cam-frame-ver');
+  const statusEl = document.getElementById('cam-status-ver');
+
+  async function loop() {
+    if (video.readyState >= 2) {
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const det = await faceapi
+        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.4, inputSize: 320 }))
+        .withFaceLandmarks().withFaceDescriptor();
+
+      if (det) {
+        frame.classList.add('detected');
+        const match = matcher.findBestMatch(det.descriptor);
+        const b = det.detection.box;
+
+        if (match.label !== 'unknown') {
+          statusEl.textContent = 'تم التعرف ✓';
+          statusEl.className = 'cam-status ok';
+          ctx.strokeStyle = '#1D9E75'; ctx.lineWidth = 2;
+          ctx.strokeRect(b.x, b.y, b.width, b.height);
+          if (Date.now() - lastMatchTime > 3500) {
+            lastMatchTime = Date.now();
+            const [uid, name] = match.label.split('|');
+            const conf = Math.round((1 - match.distance) * 100);
+            showVerifyResult(uid, name, conf, true);
+          }
+        } else {
+          statusEl.textContent = 'غير مسجل';
+          statusEl.className = 'cam-status err';
+          ctx.strokeStyle = '#E24B4A'; ctx.lineWidth = 2;
+          ctx.strokeRect(b.x, b.y, b.width, b.height);
+          if (Date.now() - lastMatchTime > 3500) {
+            lastMatchTime = Date.now();
+            showVerifyResult(null, null, null, false);
+          }
+        }
+      } else {
+        frame.classList.remove('detected');
+        statusEl.textContent = 'ابحث عن وجه...';
+        statusEl.className = 'cam-status';
+      }
+    }
+    state.verifyLoop = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+function showVerifyResult(uid, name, conf, found) {
+  const el = document.getElementById('verify-result');
+  el.innerHTML = found
+    ? `<div class="result-card">
+         <div class="r-icon"><i class="ti ti-circle-check" aria-hidden="true"></i></div>
+         <div class="r-label">المعرف الفريد</div>
+         <div class="r-uid">${uid}</div>
+         <div class="r-name">${name}</div>
+         <div class="r-conf">نسبة التطابق: ${conf}%</div>
+       </div>`
+    : `<div class="unknown-card">
+         <div class="u-icon"><i class="ti ti-user-x" aria-hidden="true"></i></div>
+         <div class="u-label">وجه غير مسجل في النظام</div>
+       </div>`;
+  setTimeout(() => { el.innerHTML = ''; }, 4000);
+}
+
+function resetAll() {
+  cancelAnimationFrame(state.detectLoop); cancelAnimationFrame(state.verifyLoop);
+  state.detectLoop = null; state.verifyLoop = null;
+  if (state.stream) { state.stream.getTracks().forEach(t => t.stop()); state.stream = null; }
+  if (state.verStream) { state.verStream.getTracks().forEach(t => t.stop()); state.verStream = null; }
+  state.users = []; lastMatchTime = 0;
+  document.getElementById('verify-result').innerHTML = '';
+  document.getElementById('perm-error').style.display = 'none';
+  const btn = document.getElementById('perm-btn');
+  btn.disabled = false;
+  btn.innerHTML = '<i class="ti ti-camera" aria-hidden="true"></i> السماح بالكاميرا والبدء';
+  updateRegUI();
+  showPhase('permission');
+}
+</script>
+</body>
+</html>
